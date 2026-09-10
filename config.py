@@ -1,0 +1,4 @@
+MODEL_PATH = "robot/dummy_lamp_6dof.urdf" 
+CAMERA_ID = 0 
+SMOOTHING_FACTOR = 0.05 
+PERSON_TIMEOUT = 2.0
