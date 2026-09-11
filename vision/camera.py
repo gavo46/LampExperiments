@@ -11,3 +11,5 @@ class Camera:
     
     def release(self): 
         self.cap.release()
+
+        
