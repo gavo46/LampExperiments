@@ -1,64 +1,96 @@
 import threading
 import time
-import cv2
+
 import mujoco
 import mujoco.viewer
-import mediapipe as mp
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
 
-from control.poses import poses
+import config
+from character.behavior import choose_pose
+from character.state import SharedState, MODE_LISTENING, MODE_THINKING, MODE_SPEAKING
 from control.controller import move_toward_target
+from speech import think
+from speech.listen import listen_loop
+from speech.speak import speak
+from vision import scene, tracking
 
-face_present = False
-face_x = 0.5
+# Simple keyword heuristic for "go look at what's in front of you and
+# remember it." Replace/extend however you like later.
+SCENE_TRIGGERS = ("what is this", "what's this", "look at this", "remember this")
+
+# Guards against a second utterance kicking off a new
+# Ollama/speak pipeline while one is already in flight.
+_pipeline_lock = threading.Lock()
 
 
-def watch_camera():
-    global face_present, face_x
+def _on_speech_start(state):
+    if _pipeline_lock.locked():
+        return  # already mid-conversation; don't interrupt the pipeline's own mode changes
+    state.set_mode(MODE_LISTENING)
 
-    base_options = python.BaseOptions(
-        model_asset_path="vision/blaze_face_short_range.tflite"
-    )
-    options = vision.FaceDetectorOptions(
-        base_options=base_options,
-        min_detection_confidence=0.5
-    )
-    detector = vision.FaceDetector.create_from_options(options)
 
-    capture = cv2.VideoCapture(0)
+def _on_speech_end(state):
+    if _pipeline_lock.locked():
+        return
+    state.return_to_resting()
 
-    while capture.isOpened():
-        ret, frame = capture.read()
-        if not ret:
-            continue
 
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        result = detector.detect(mp_image)
+def _on_utterance(state, text):
+    if not _pipeline_lock.acquire(blocking=False):
+        print("[main] still handling the previous utterance, ignoring:", text)
+        return
+    state.set_mode(MODE_THINKING)
+    threading.Thread(target=_run_pipeline, args=(state, text), daemon=True).start()
 
-        if result.detections:
-            face_present = True
-            bbox = result.detections[0].bounding_box
-            center_x = bbox.origin_x + bbox.width / 2
-            face_x = center_x / frame.shape[1]
-        else:
-            face_present = False
+
+def _run_pipeline(state, text):
+    """text -> (optional scene lookup) -> Ollama -> speech.
+
+    Runs entirely off the sim thread so Whisper (already off-thread in
+    speech/listen.py) and the LLM/TTS calls here never block the sim loop.
+    """
+    try:
+        if any(trigger in text.lower() for trigger in SCENE_TRIGGERS):
+            scene.remember_current_view(state)
+
+        memory_snapshot = state.get_memory_snapshot()
+        reply = think.respond(text, memory_snapshot)
+
+        state.set_mode(MODE_SPEAKING)
+        speak(reply)
+    finally:
+        state.return_to_resting()
+        _pipeline_lock.release()
 
 
 def main():
+    state = SharedState()
+
     model = mujoco.MjModel.from_xml_path("robot/dummy_lamp_5dof.urdf")
     data = mujoco.MjData(model)
 
-    threading.Thread(target=watch_camera, daemon=True).start()
+    threading.Thread(
+        target=tracking.watch, args=(state, config.CAMERA_ID), daemon=True
+    ).start()
+
+    threading.Thread(
+        target=listen_loop,
+        args=(lambda text: _on_utterance(state, text),),
+        kwargs={
+            "on_speech_start": lambda: _on_speech_start(state),
+            "on_speech_end": lambda: _on_speech_end(state),
+        },
+        daemon=True,
+    ).start()
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
         while viewer.is_running():
-            if face_present:
-                target = list(poses["alert"])
-                target[0] = (face_x - 0.5) * -2.0
-            else:
-                target = poses["neutral"]
+            mode = state.get_mode()
+            face_present, face_x = state.get_face()
+
+            # --- POSE STUB: character/behavior.py:choose_pose() ---
+            # Mode -> actual pose/gesture, and all timing/expressiveness,
+            # is intentionally left to you to fill in there.
+            target = choose_pose(mode, face_present, face_x)
 
             move_toward_target(data, target)
             mujoco.mj_forward(model, data)
