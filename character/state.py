@@ -14,6 +14,14 @@ MODES = (MODE_IDLE, MODE_ENGAGED, MODE_LISTENING, MODE_THINKING, MODE_SPEAKING)
 # reacting to whether a face is in frame.
 _RESTING_MODES = (MODE_IDLE, MODE_ENGAGED)
 
+MOOD_PLEASANT = "pleasant"
+MOOD_CONFUSED = "confused"
+MOOD_PASSIONATE = "passionate"
+MOOD_REASSURING = "reassuring"
+
+MOODS = (MOOD_PLEASANT, MOOD_CONFUSED, MOOD_PASSIONATE, MOOD_REASSURING)
+DEFAULT_MOOD = MOOD_PLEASANT
+
 
 class SharedState:
     """
@@ -30,6 +38,7 @@ class SharedState:
         self._face_x = 0.5
         self._last_frame = None
         self._mode = MODE_IDLE
+        self._mood = DEFAULT_MOOD
         self._memory = CharacterMemory()
 
     # --- vision: face presence/position ---
@@ -83,6 +92,18 @@ class SharedState:
         """
         with self._lock:
             self._mode = MODE_ENGAGED if self._face_present else MODE_IDLE
+
+    # --- mood ---
+
+    def get_mood(self):
+        with self._lock:
+            return self._mood
+
+    def set_mood(self, mood):
+        if mood not in MOODS:
+            raise ValueError(f"Unknown mood: {mood!r}")
+        with self._lock:
+            self._mood = mood
 
     # --- object memory ---
 
