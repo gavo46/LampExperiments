@@ -58,7 +58,12 @@ def watch(state, camera_id=0):
             if frame is None:
                 continue
 
-            face_present, face_x = detect_face(detector, frame)
+            try:
+                face_present, face_x = detect_face(detector, frame)
+            except RuntimeError:
+                detector = _make_detector()
+                continue
+
             state.set_face(face_present, face_x)
             state.set_last_frame(frame)
     finally:

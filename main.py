@@ -52,8 +52,7 @@ def _run_pipeline(state, text):
         if any(trigger in text.lower() for trigger in SCENE_TRIGGERS):
             scene.remember_current_view(state)
 
-        memory_snapshot = state.get_memory_snapshot()
-        reply = think.respond(text, memory_snapshot)
+        reply = think.respond(state, text)
 
         state.set_mode(MODE_SPEAKING)
         speak(reply)

@@ -1,22 +1,24 @@
 from control.poses import poses
-
+import math
+import time
+from character.state import MODE_IDLE, MODE_ENGAGED, MODE_LISTENING, MODE_THINKING, MODE_SPEAKING
 
 def choose_pose(mode, face_present, face_x):
-    """
-    STUB - fill this in.
-
-    Decide what pose/gesture the lamp should move toward for the
-    current mode (one of the MODE_* constants in character/state.py:
-    idle, engaged, listening, thinking, speaking). `face_present` and
-    `face_x` are the latest vision readings, in case a mode's pose
-    should react to where the face is.
-
-    Return a 5-element joint target list - see control/poses.py for
-    examples, or build your own. All timing/easing/expressiveness is
-    up to you and control/controller.py's move_toward_target(); this
-    function only needs to decide *what* to move toward.
-
-    For now every mode maps to "neutral" so the sim loop always has a
-    valid target while you build this out.
-    """
+    if mode == MODE_IDLE:
+        return list(poses["neutral"])
+    if mode == MODE_ENGAGED:
+        target = list(poses["alert"])
+        target[0] = (face_x - 0.5) * -2.0
+        return target
+    if mode == MODE_LISTENING:
+        target = [0.0, 0.1, 0.9, 1.0, -1.5]
+        target[0] = (face_x - 0.5) * -2.0
+        return target
+    if mode == MODE_THINKING:
+        return [0.0, 0.1, 0.9, 1.0, -1.2]
+    if mode == MODE_SPEAKING:
+        target = list(poses["alert"])
+        target[0] = (face_x - 0.5) * -2.0
+        target[4] = poses["alert"][4] + 0.15 * math.sin(time.time() * 6)
+        return target
     return list(poses["neutral"])

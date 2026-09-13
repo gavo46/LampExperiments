@@ -99,3 +99,15 @@ class SharedState:
         or format outside the lock (e.g. to build an LLM prompt)."""
         with self._lock:
             return dict(self._memory.objects)
+
+    # --- conversation history ---
+
+    def add_exchange(self, user_text, assistant_text):
+        with self._lock:
+            self._memory.add_exchange(user_text, assistant_text)
+
+    def get_history_messages(self):
+        """A copy of the conversation history in Ollama's messages format,
+        oldest first - safe to read outside the lock."""
+        with self._lock:
+            return self._memory.get_history_messages()

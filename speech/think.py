@@ -1,7 +1,8 @@
 """
-Text -> local Ollama (llama3.2) -> reply text. Folds in whatever the
-object-memory dict holds so the character can refer back to things
-it's seen (see vision/scene.py).
+Text -> local Ollama (llama3.2) -> reply text. Folds in the object-memory
+dict (see vision/scene.py) and prior conversation turns (see
+character/memory.py) so the character doesn't reintroduce itself or
+repeat questions every turn.
 """
 
 import ollama
@@ -9,8 +10,9 @@ import ollama
 CHAT_MODEL = "llama3.2"
 SYSTEM_PROMPT = (
     "You are a small desk lamp character with a camera and a voice. "
-    "Keep replies short and conversational, like something you'd say "
-    "out loud, not written text."
+    "Respond in at most one or two short sentences - a quick spoken "
+    "reaction, never a paragraph. You remember the conversation so far, "
+    "so don't reintroduce yourself or repeat earlier questions."
 )
 
 
@@ -23,28 +25,31 @@ def _format_memory(memory_snapshot):
     return f"Things you remember seeing:\n{lines}\n\n"
 
 
-def respond(text, memory_snapshot=None):
+def respond(state, text):
     """
-    Send `text` to the local LLM and return its reply as a string.
+    Send `text` to the local LLM, using `state` for both object-memory
+    context and conversation history, and return the reply string.
 
-    `memory_snapshot` is a dict of remembered objects (see
-    character/state.py's get_memory_snapshot()); it's included in the
-    prompt so the model can reference what's been seen, even on
-    utterances that aren't themselves about the camera.
+    The history in `state` is read and appended to through its
+    thread-safe methods, so this is safe to call from a pipeline
+    thread while other threads read/write `state` concurrently.
     """
-    memory_context = _format_memory(memory_snapshot or {})
-    user_prompt = f"{memory_context}{text}"
+    memory_context = _format_memory(state.get_memory_snapshot())
+    history = state.get_history_messages()
+
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages.extend(history)
+    messages.append({"role": "user", "content": f"{memory_context}{text}"})
 
     try:
-        response = ollama.chat(
-            model=CHAT_MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
+        response = ollama.chat(model=CHAT_MODEL, messages=messages)
+        reply = response["message"]["content"].strip()
     except Exception as exc:
         print(f"[think] LLM call failed: {exc}")
-        return "Sorry, I'm having trouble thinking right now."
+        reply = "Sorry, I'm having trouble thinking right now."
 
-    return response["message"]["content"].strip()
+    # Record the raw exchange (not the memory-injected prompt) so history
+    # doesn't re-duplicate the object list on every replay.
+    state.add_exchange(text, reply)
+
+    return reply
