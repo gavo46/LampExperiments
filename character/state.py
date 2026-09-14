@@ -7,8 +7,9 @@ MODE_ENGAGED = "engaged"
 MODE_LISTENING = "listening"
 MODE_THINKING = "thinking"
 MODE_SPEAKING = "speaking"
+MODE_DANCING = "dancing"
 
-MODES = (MODE_IDLE, MODE_ENGAGED, MODE_LISTENING, MODE_THINKING, MODE_SPEAKING)
+MODES = (MODE_IDLE, MODE_ENGAGED, MODE_LISTENING, MODE_THINKING, MODE_SPEAKING, MODE_DANCING)
 
 # Modes where nothing conversational is happening yet - just passively
 # reacting to whether a face is in frame.
