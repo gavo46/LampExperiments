@@ -94,6 +94,22 @@ class SharedState:
         with self._lock:
             self._mode = MODE_ENGAGED if self._face_present else MODE_IDLE
 
+    def sync_music_mode(self, music_playing):
+        """
+        Call once per sim-loop frame with whether music is currently
+        playing. Keeps mode in sync with playback without waiting for a
+        conversation turn to end: idle/engaged flips to dancing the
+        moment music starts, and dancing drops back to idle/engaged the
+        moment it stops. Listening/thinking/speaking are left alone - a
+        conversation turn in progress is never interrupted.
+        """
+        with self._lock:
+            if music_playing:
+                if self._mode in _RESTING_MODES or self._mode == MODE_DANCING:
+                    self._mode = MODE_DANCING
+            elif self._mode == MODE_DANCING:
+                self._mode = MODE_ENGAGED if self._face_present else MODE_IDLE
+
     # --- mood ---
 
     def get_mood(self):

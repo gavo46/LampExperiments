@@ -14,7 +14,6 @@ from character.state import (
     MODE_LISTENING,
     MODE_THINKING,
     MODE_SPEAKING,
-    MODE_DANCING,
     MOOD_PLEASANT,
     MOOD_CONFUSED,
     MOOD_PASSIONATE,
@@ -24,6 +23,7 @@ from control.controller import move_toward_target
 from speech import think
 from speech.listen import listen_loop
 from speech.speak import speak
+from utils import metrics
 from vision import scene, tracking
 
 # Simple keyword heuristic for "go look at what's in front of you and
@@ -47,50 +47,52 @@ MOOD_COLORS = {
 _pipeline_lock = threading.Lock()
 
 
-def _return_to_resting_or_dancing(state, music_player):
-    """
-    Drop back to idle/engaged as usual (character/state.py's
-    return_to_resting(), unchanged) unless music is still playing, in
-    which case go to MODE_DANCING instead - so a conversational
-    interruption while music plays resumes dancing afterward rather
-    than falling back to idle/engaged.
-    """
-    if music_player.is_playing():
-        state.set_mode(MODE_DANCING)
-    else:
-        state.return_to_resting()
-
-
-def _on_speech_start(state):
+def _on_speech_start(state, music_player):
     if _pipeline_lock.locked():
         return  # already mid-conversation; don't interrupt the pipeline's own mode changes
+    if music_player.is_playing():
+        # The music itself is loud and continuous enough to cross
+        # listen.py's amplitude threshold on its own - don't let that
+        # false trigger visually knock it out of dancing. A genuine
+        # command (e.g. "stop the music") still reaches _on_utterance
+        # regardless, since that path doesn't go through here.
+        return
     state.set_mode(MODE_LISTENING)
 
 
 def _on_speech_end(state, music_player):
     if _pipeline_lock.locked():
         return
-    _return_to_resting_or_dancing(state, music_player)
+    if music_player.is_playing():
+        return
+    state.return_to_resting()
 
 
-def _on_utterance(state, music_player, text):
+def _on_utterance(state, music_player, text, trace=None):
     if not _pipeline_lock.acquire(blocking=False):
         print("[main] still handling the previous utterance, ignoring:", text)
         return
     state.set_mode(MODE_THINKING)
     threading.Thread(
-        target=_run_pipeline, args=(state, music_player, text), daemon=True
+        target=_run_pipeline, args=(state, music_player, text, trace), daemon=True
     ).start()
 
 
-def _run_pipeline(state, music_player, text):
+def _run_pipeline(state, music_player, text, trace=None):
     """text -> (optional scene lookup / music control) -> Ollama -> speech.
 
     Runs entirely off the sim thread so Whisper (already off-thread in
     speech/listen.py) and the LLM/TTS calls here never block the sim loop.
     Speech recognition and responses keep working normally regardless of
     whether music is playing - MODE_DANCING doesn't gate anything in
-    speech/listen.py or here.
+    speech/listen.py or here. Getting to MODE_DANCING itself doesn't wait
+    on this pipeline either - state.sync_music_mode() in main()'s loop
+    flips to it as soon as music_player.start() above makes is_playing()
+    true, on the very next frame.
+
+    `trace` (utils.metrics.UtteranceTrace, or None if config.MEASURE is
+    False) is marked at the two stage boundaries that happen here -
+    LLM response ready and speech start - then printed/recorded.
     """
     try:
         lowered = text.lower()
@@ -104,15 +106,22 @@ def _run_pipeline(state, music_player, text):
             scene.remember_current_view(state)
 
         reply = think.respond(state, text)
+        if trace:
+            trace.mark("llm_done")
 
         state.set_mode(MODE_SPEAKING)
+        if trace:
+            trace.mark("speech_start")
+            trace.finish()
         speak(reply)
     finally:
-        _return_to_resting_or_dancing(state, music_player)
+        state.return_to_resting()
         _pipeline_lock.release()
 
 
 def main():
+    metrics.start()
+
     state = SharedState()
 
     # build_model() (not MjModel.from_xml_path) - it adds the lamp's
@@ -129,9 +138,9 @@ def main():
 
     threading.Thread(
         target=listen_loop,
-        args=(state, lambda text: _on_utterance(state, music_player, text)),
+        args=(state, lambda text, trace: _on_utterance(state, music_player, text, trace)),
         kwargs={
-            "on_speech_start": lambda: _on_speech_start(state),
+            "on_speech_start": lambda: _on_speech_start(state, music_player),
             "on_speech_end": lambda: _on_speech_end(state, music_player),
         },
         daemon=True,
@@ -139,6 +148,9 @@ def main():
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
         while viewer.is_running():
+            music_playing = music_player.is_playing()
+            state.sync_music_mode(music_playing)
+
             mode = state.get_mode()
             face_present, face_x = state.get_face()
             beat_phase = music_player.get_beat_phase()
@@ -150,7 +162,7 @@ def main():
             # is intentionally left to you to fill in there. beat_phase
             # (0.0 when music isn't playing) is what the MODE_DANCING
             # stub has to work with - see character/music.py.
-            target = choose_pose(mode, face_present, face_x, beat_phase)
+            target = choose_pose(mode, face_present, face_x, beat_phase, music_playing)
 
             # mood -> light color/intensity (see MOOD_COLORS above). intensity
             # is fixed at 1.0 for every mood here; vary it per-mood too if

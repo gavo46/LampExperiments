@@ -12,8 +12,7 @@ import ollama
 
 VISION_MODEL = "llama3.2-vision"
 DESCRIBE_PROMPT = (
-    "Briefly describe the main object you see, in one short phrase. "
-    "Just the description, no preamble."
+    "A person is holding an object up to the camera. Identify only the object they are holding, in one short phrase. Do not describe the person, their face, or the background."
 )
 
 
@@ -27,7 +26,7 @@ def describe_frame(frame, prompt=DESCRIBE_PROMPT):
     ok, buffer = cv2.imencode(".jpg", frame)
     if not ok:
         return None
-
+    cv2.imwrite("debug_frame.jpg", frame)
     try:
         response = ollama.chat(
             model=VISION_MODEL,

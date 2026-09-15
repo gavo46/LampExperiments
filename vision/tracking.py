@@ -1,11 +1,65 @@
+import time
+
 import cv2
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision as mp_vision
 
+import config
+from utils import metrics
 from vision.camera import Camera
 
 MODEL_PATH = "vision/blaze_face_short_range.tflite"
+
+# How often to log/record engagement stats, and the window they cover
+# (each report resets the counters, so it's the last REPORT_INTERVAL_SECONDS,
+# not a sliding window).
+REPORT_INTERVAL_SECONDS = 30.0
+
+
+class _EngagementTracker:
+    """
+    Counts frames, frames-with-a-face, and face_present flips since the
+    last report. update() is called every frame; maybe_report() checks
+    whether REPORT_INTERVAL_SECONDS has elapsed and, if so, prints and
+    records detection rate + flips/minute, then resets the window.
+    """
+
+    def __init__(self):
+        self._window_start = time.monotonic()
+        self._frame_count = 0
+        self._face_frame_count = 0
+        self._flip_count = 0
+        self._last_present = None
+
+    def update(self, face_present):
+        self._frame_count += 1
+        if face_present:
+            self._face_frame_count += 1
+        if self._last_present is not None and face_present != self._last_present:
+            self._flip_count += 1
+        self._last_present = face_present
+
+    def maybe_report(self):
+        elapsed = time.monotonic() - self._window_start
+        if elapsed < REPORT_INTERVAL_SECONDS or self._frame_count == 0:
+            return
+
+        detection_rate = self._face_frame_count / self._frame_count
+        flips_per_minute = self._flip_count * (60.0 / elapsed)
+
+        print(
+            "[metrics] engagement  "
+            f"detection_rate={detection_rate:.1%}  "
+            f"flips/min={flips_per_minute:.1f}  "
+            f"frames={self._frame_count}  window={elapsed:.0f}s"
+        )
+        metrics.record_engagement(detection_rate, flips_per_minute)
+
+        self._window_start = time.monotonic()
+        self._frame_count = 0
+        self._face_frame_count = 0
+        self._flip_count = 0
 
 
 def _make_detector():
@@ -51,6 +105,7 @@ def watch(state, camera_id=0):
     """
     detector = _make_detector()
     camera = Camera(camera_id)
+    tracker = _EngagementTracker() if config.MEASURE else None
 
     try:
         while True:
@@ -66,6 +121,10 @@ def watch(state, camera_id=0):
 
             state.set_face(face_present, face_x)
             state.set_last_frame(frame)
+
+            if tracker:
+                tracker.update(face_present)
+                tracker.maybe_report()
     finally:
         camera.release()
 
