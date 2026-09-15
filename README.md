@@ -1,6 +1,5 @@
 LampExperiments
 A 5-DOF desk lamp that behaves like a character. It notices when someone is present and tracks their face, holds a spoken conversation, remembers objects it is shown, and nods along to music. All inference runs locally.
-Demo video: [link]
 Technical note: TECHNICAL_NOTE.md — architecture, design decisions, measurements, and limitations.
 Requirements
 macOS (Apple Silicon); see the technical note for Linux/Ubuntu deployment notes
