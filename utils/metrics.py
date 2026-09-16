@@ -1,6 +1,6 @@
 """
-Opt-in instrumentation for the numbers the challenge rubric asks for:
-per-utterance latency breakdown, face-detection engagement stats, and
+Opt-in instrumentation for per-utterance latency breakdown,
+face-detection engagement stats, and
 process CPU/RSS usage, plus a consolidated summary on exit.
 
 Everything here is gated behind config.MEASURE. When it's False, every
