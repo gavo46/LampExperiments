@@ -61,4 +61,4 @@ utils/         instrumentation
 main.py        entry point
 
 Notes
-[Anything a reader needs to know before running — the music asset, known rough edges, whatever you want to flag up front.]
+In the process of being implemented is a feature that will allow the user to trade 4's with the lamp logically and with a humanistic, musical context in mind.
